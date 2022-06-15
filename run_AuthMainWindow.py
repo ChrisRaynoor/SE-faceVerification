@@ -20,7 +20,10 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
 
         # 进行信号槽连接如
         # self.cameraButton.clicked.connect(self.showDialog)
+        # 登录按钮
         self.login_pushButton.released.connect(self.startLoginWidget)
+        # 登出按钮
+        self.logout_pushButton.released.connect(self.logout)
 
     # 登录
     def startLoginWidget(self):
@@ -45,6 +48,20 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
             # 登陆失败
             QMessageBox.information(self, "Hint", "The username and password are invalid or do not match.")
 
+    # 登出按钮槽
+    def logout(self):
+        # 判断是否已经登录
+        if self.user.loggedIn:
+            # 已登录
+            reply = QMessageBox.question(self, "Logout", "Are you sure to log out?")
+            # 是否确定登出
+            if reply == QMessageBox.Yes:
+                self.user.logout()
+            # else: do nothing
+            pass
+        else:
+            # 未登录
+            QMessageBox.information(self, "Hint", "Please login first.")
 # debug
 if __name__ == "__main__":
     import sys

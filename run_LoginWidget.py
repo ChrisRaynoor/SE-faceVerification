@@ -32,13 +32,13 @@ class LoginWidget(QWidget, Ui_LoginWidget):
 
     # 发出longin信号
     def emitLoginSignal(self):
-        print('emit')
+        # print('emit')
         username = self.username_lineEdit.text()
         password = self.password_lineEdit.text()
         self.hide()
         self.loginSignal[str, str].emit(username, password)
         self.close()
-        print('closed')
+        # print('closed')
         # debug:说明close在这里不代表其被删除
         # self.show()
     # todo
