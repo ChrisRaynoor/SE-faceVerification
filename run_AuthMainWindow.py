@@ -1,12 +1,15 @@
+import logging
+
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import pyqtSignal,Qt
 # import 对应需要的ui_xxx.py的窗口类
+import tools
 from ui_AuthMainWindow import Ui_AuthMainWindow
 from run_LoginWidget import LoginWidget
 # 其他依赖
 import models
-
+from settings import *
 # 实现分离逻辑
 # note
 # 由于ui基于QMainWindow,这里也应对应继承.继承QWidget报错object has no attribute 'setStatusBar
@@ -17,6 +20,8 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         self.setupUi(self)#self?
         # 该窗口的对象
         self.user = models.User()
+        self.camera = tools.MyQCamera(display_size=CAM_DISPLAY_SIZE, cropped_frame_size=CAM_CROPPED_DISPLAY_SIZE,
+                                      hint_color=CAM_CROPPED_DISPLAY_LINE_RGB)
 
         # 进行信号槽连接如
         # self.cameraButton.clicked.connect(self.showDialog)
@@ -24,7 +29,15 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         self.login_pushButton.released.connect(self.startLoginWidget)
         # 登出按钮
         self.logout_pushButton.released.connect(self.logout)
+        # camera更新
+        self.camera.pixmap_change_signal.connect(self.updateCamLabel)
+        # todo: 现用于测试的原按钮
+        self.faceAuthenticate_pushButton.released.connect(self.camera.start)
 
+    # 摄像更新
+    def updateCamLabel(self, pixmap):
+        logging.debug("try set pixmap")
+        self.cam_label.setPixmap(pixmap)
     # 登录
     def startLoginWidget(self):
         # 判断是否已经登录

@@ -12,7 +12,7 @@ def main():
     # 配置logging输出
     # 最终版应该改为 level=logging.WARNING
     timestamp = time.time()
-    timestr = time.strftime("-%Y-%m-%d--%H-%M-%S-", time.localtime()) + int(timestamp)
+    timestr = time.strftime("-%Y-%m-%d--%H-%M-%S-", time.localtime()) + str(int(timestamp))
     logging.basicConfig(filename=f'main{timestr}.log', level=logging.DEBUG)
     logging.info('Started')
     # qt程序

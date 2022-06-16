@@ -1,5 +1,6 @@
 # ./tools.py
 # 工具函数和类
+import logging
 import time
 
 import numpy
@@ -186,13 +187,13 @@ class MyQCamera(QObject):
     # 信号
 
     pixmap_change_signal = pyqtSignal(QPixmap)
-    latest_cropped_PIL_signal = pyqtSignal(PIL.Image)
+    # latest_cropped_PIL_signal = pyqtSignal(PIL.Image) # todo 类型不支持
     #
     # get_faceVector_signal = pyqtSignal()
     # set_faceVector_signal = pyqtSignal(numpy.ndarray)
 
-    def __init__(self, parent=None, cam_num=0, display_size = (640, 480),cropped_frame_size=(240, 320), hint_color=(255, 0, 0), frame_rate=25):
-        super(MyQCamera, self).__init__(parent = parent)
+    def __init__(self, cam_num=0, display_size = (640, 480),cropped_frame_size=(240, 320), hint_color=(255, 0, 0), frame_rate=25):
+        super(MyQCamera, self).__init__()
         self.cap = cv2.VideoCapture(cam_num)
         self.cam_num = cam_num
         self.display_size = display_size
@@ -200,13 +201,16 @@ class MyQCamera(QObject):
         # 原始大小
         width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))  # int
         height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))  # int
-        # print(f'Webcam image size: ({width}, {height})')  # webcam_size
+        #print(f'Webcam image size: ({width}, {height})')  # webcam_size
 
         frame_width = cropped_frame_size[0]
         frame_height = cropped_frame_size[1]
         self.thickness = 3
         self.start_point = ((width - frame_width) // 2, (height - frame_height) // 2)
+        logging.debug(f"{width} {frame_width} {height} {frame_height} {(width - frame_width) / 2}")
+        logging.debug(self.start_point)
         self.end_point = (self.start_point[0] + frame_width, self.start_point[1] + frame_height)
+        logging.debug(self.end_point)
         self.hint_color = hint_color
         self.frame_rate = frame_rate
         self.frame_time = 1.0 / frame_rate
@@ -216,44 +220,62 @@ class MyQCamera(QObject):
 
         # timer
         self.captureTimer = QTimer()
-        self.timer.timeout.connect()# todo
+        self.captureTimer.timeout.connect(self.getNewFrame_QPixmap)
 
     def __getFrame(self):
         """Returns the next captured image array"""
+        logging.info("getnewframe")
         rval, frame = self.cap.read()
+        logging.debug("1")
         if rval:
+            logging.debug("2")
             frame = cv2.rectangle(frame, tuple(q - self.thickness for q in self.start_point),
                                   tuple(q + self.thickness for q in self.end_point),
-                                  self.color, self.thickness)
+                                  self.hint_color, self.thickness)
             # mirrored framed
             frame = cv2.flip(frame, 1)
             # convert to RGB
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             # saved for later
             # cropped
-            cropped_img = frame[self.start_point[1]:self.end_point[1],
+            cropped_img = frame.copy()
+            cropped_img = cropped_img[self.start_point[1]:self.end_point[1],
                           self.start_point[0]:self.end_point[0]]
-            self.latestCroppedFrame = cropped_img.copy()
+            self.latestCroppedFrame = cropped_img
+            logging.debug("3")
         return rval, frame
 
     def getNewFrame_QPixmap(self):
         rval, frame = self.__getFrame()
+        logging.debug("21")
         if rval:
+            # frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGRA)
+            logging.debug("22")
             # array frame to pixmap
-            pixmap = QtGui.QPixmap(frame).scaled(self.label.width(), self.label.height(),QtCore.Qt.KeepAspectRatio)
-            self.pixmap_change_signal.emit(pixmap)
+            logging.debug(type(frame))
+            logging.debug(frame)
+            logging.debug(frame.shape)
+            logging.debug(frame.dtype)
+            image = QtGui.QImage(frame.data, frame.shape[1], frame.shape[0], QtGui.QImage.Format_RGB888)
+            logging.debug("23")
 
-    def getLatestCroppedPIL(self):
-        if self.latestCroppedFrame is None:
-            self.latest_cropped_PIL_signal.emit(None)
-        else:
-            image = Image.fromarray(self.latestCroppedFrame)
-            self.latest_cropped_PIL_signal.emit(image)
-        pass
+            pixmap = QtGui.QPixmap(image).scaled(self.display_size[0], self.display_size[1],
+                                                 aspectRatioMode=QtCore.Qt.KeepAspectRatio)
+            logging.debug("pixmap converted")
+            self.pixmap_change_signal.emit(pixmap)
+            logging.debug("pixmap send")
+    # todo 类型不支持
+    # def getLatestCroppedPIL(self):
+    #     if self.latestCroppedFrame is None:
+    #         self.latest_cropped_PIL_signal.emit(None)
+    #     else:
+    #         image = Image.fromarray(self.latestCroppedFrame)
+    #         self.latest_cropped_PIL_signal.emit(image)
+    #     pass
+
     def closeCamera(self):
         """
         应在使用完后调用以释放camera
-        :return:
         """
         self.cap.release()
 
@@ -261,10 +283,6 @@ class MyQCamera(QObject):
     def start(self):
         self.captureTimer.start(self.frame_time * 1000)
 
-    # 重写run()定义QThread行为
-    # 任务:
-    # 创建时有capture_only:不进行识别,仅充当捕获
-    # 按照帧时进行图片捕获,发送信号(由UI接收并显示)
-    # 按照处理时长间隔将裁剪框内图片送入mctnn-resnet
-
-# #
+    # 停止图像采集
+    def pause(self):
+        self.captureTimer.stop()
