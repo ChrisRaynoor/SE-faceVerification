@@ -62,6 +62,8 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         else:
             # 未登录
             QMessageBox.information(self, "Hint", "Please login first.")
+
+    # 图像捕获任务
 # debug
 if __name__ == "__main__":
     import sys

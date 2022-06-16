@@ -1,7 +1,7 @@
 # ./models.py
 # 实现与数据库直接交互的模型
 import tempfile
-
+import numpy
 import tools
 import numpy as np
 import mydb
@@ -12,6 +12,7 @@ from logging import debug
 class User(QObject):
     # todo
     # 定义该类会发出的信号
+    faceVector_get_signal = pyqtSignal(numpy.ndarray)
     # 默认初始化一个空用户
     def __init__(self, uid = None, username = None):
         super(User, self).__init__()
@@ -130,7 +131,9 @@ class User(QObject):
                              {"a_uid":self.uid})
                 row = cur.fetchone()
                 if row is None:
+                    self.faceVector_get_signal.emit(None)
                     return None
+                self.faceVector_get_signal.emit(row["faceVector"])
                 return row["faceVector"]
         # 可用于处理with conn内的错误
         # except sqlite3.DatabaseError as e:
