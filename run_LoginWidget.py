@@ -41,5 +41,4 @@ class LoginWidget(QWidget, Ui_LoginWidget):
         # print('closed')
         # debug:说明close在这里不代表其被删除
         # self.show()
-    # todo
-    # 如果要实现保存上次的登录名，使用closeevent
+    # todo 如果要实现保存上次的登录名，使用closeevent

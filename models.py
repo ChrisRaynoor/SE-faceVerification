@@ -1,5 +1,7 @@
 # ./models.py
 # 实现与数据库直接交互的模型
+import tempfile
+import numpy
 import tools
 import numpy as np
 import mydb
@@ -8,14 +10,15 @@ from PyQt5.QtCore import QObject, pyqtSignal
 from logging import debug
 
 class User(QObject):
-    # todo
     # 定义该类会发出的信号
+    faceVector_get_signal = pyqtSignal(numpy.ndarray)
     # 默认初始化一个空用户
     def __init__(self, uid = None, username = None):
         super(User, self).__init__()
         self.uid = uid
         self.username = username
         self.loggedIn = False
+        self.tmpDir = None # 由tempfile类生成的用于该用户的临时文件路径，应在logout时删除
         # tip:
         # 一个user对象可能没有对应的数据库记录,是否存在要调用其id查一次
 
@@ -35,6 +38,7 @@ class User(QObject):
                 self.uid = row['user_id']
                 self.username = username
                 self.loggedIn = True
+                self.tmpDir = tempfile.TemporaryDirectory()
                 return True
         # 可用于处理with conn内的错误
         # except sqlite3.DatabaseError as e:
@@ -45,7 +49,7 @@ class User(QObject):
         self.uid = None
         self.username = None
         self.loggedIn = False
-
+        self.tmpDir = None
     # 判断用户存在
     @staticmethod
     def isUsernameExist(username):
@@ -86,18 +90,25 @@ class User(QObject):
         finally:
             mydb.closeConn(conn)
     # 录入人脸
-    def registerFace(self, faceVector):
+    def setFaceVector(self, faceVector):
+        '''
+        更改数据库中的faceVector
+        :param faceVector:
+        :return:
+        '''
         # 数据库连接错误另外处理
         conn = mydb.getConn()
         # 下面的try主要保证close被执行，因为没查到关于自动释放的文档
         try:
             with conn:
                 # 确认用户存在
-                cur = conn.execute("select user_id from user_authentication where user_id=:a_uid",
-                             {"a_uid":self.uid})
-                row = cur.fetchone()
-                if row is None:
+                if not self.loggedIn:
                     return False
+                # cur = conn.execute("select user_id from user_authentication where user_id=:a_uid",
+                #              {"a_uid":self.uid})
+                # row = cur.fetchone()
+                # if row is None:
+                #     return False
                 # 更新人脸
                 cur = conn.execute("update user_authentication set faceVector=:a_vector where user_id=:a_uid",
                                    {"a_vector":faceVector, "a_uid":self.uid})
@@ -119,7 +130,9 @@ class User(QObject):
                              {"a_uid":self.uid})
                 row = cur.fetchone()
                 if row is None:
+                    self.faceVector_get_signal.emit(None)
                     return None
+                self.faceVector_get_signal.emit(row["faceVector"])
                 return row["faceVector"]
         # 可用于处理with conn内的错误
         # except sqlite3.DatabaseError as e:

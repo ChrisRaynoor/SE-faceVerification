@@ -1,12 +1,15 @@
+import logging
+
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import *
-from PyQt5.QtCore import pyqtSignal,Qt
+from PyQt5.QtCore import pyqtSignal, Qt, QThread
 # import 对应需要的ui_xxx.py的窗口类
+import tools
 from ui_AuthMainWindow import Ui_AuthMainWindow
 from run_LoginWidget import LoginWidget
 # 其他依赖
 import models
-
+from settings import *
 # 实现分离逻辑
 # note
 # 由于ui基于QMainWindow,这里也应对应继承.继承QWidget报错object has no attribute 'setStatusBar
@@ -15,16 +18,48 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
     def __init__(self,parent=None):
         super(AuthMainWindow, self).__init__(parent)
         self.setupUi(self)#self?
+        # logging.debug(f"main thread {QThread.currentThreadId()}")
         # 该窗口的对象
         self.user = models.User()
+        self.camera = tools.MyQCamera(display_size=CAM_DISPLAY_SIZE, cropped_frame_size=CAM_CROPPED_DISPLAY_SIZE,
+                                      hint_color=CAM_CROPPED_DISPLAY_LINE_BGR)
 
-        # 进行信号槽连接如
-        # self.cameraButton.clicked.connect(self.showDialog)
+        # self.authThread = QtCore.QThread()
+        self.authenticator = tools.Authenticator()
+
+        # 要调用camera的lastfram
+        self.authenticator.authTimer.timeout.connect(self.camera.getLatestCroppedAsList)
+        # camera的返回信号要连接verifionce
+        self.camera.latest_cropped_img_asList_signal.connect(self.authenticator.verifyOnce)
         # 登录按钮
         self.login_pushButton.released.connect(self.startLoginWidget)
         # 登出按钮
         self.logout_pushButton.released.connect(self.logout)
-
+        # camera更新
+        self.camera.pixmap_change_signal.connect(self.updateCamLabel)
+        # todo: 现用于测试的原按钮 测试2 直接使用信号调用
+        # 开始auth的行为
+        self.faceAuthenticate_pushButton.released.connect(self.startAuthOnWindow)
+        # auth return
+        self.authenticator.authResult_signal.connect(self.showAuthResult)
+    def showAuthResult(self, isPass):
+        QMessageBox.information(self, "Hint", f"{'pass' if isPass else 'notpass'}")
+    # 开始验证的一系列行为
+    def startAuthOnWindow(self):
+        # 验证登录
+        if not self.user.loggedIn:
+            QMessageBox.information(self, "Hint", "Please login first.")
+            return
+        # 确定已经登录
+        self.camera.start()
+        faceVector = self.user.getFaceVector()
+        logging.debug(type(faceVector))
+        logging.debug(faceVector)
+        self.authenticator.startAuth(self.user.getFaceVector())
+    # 摄像更新
+    def updateCamLabel(self, pixmap):
+        # logging.debug("try set pixmap")
+        self.cam_label.setPixmap(pixmap)
     # 登录
     def startLoginWidget(self):
         # 判断是否已经登录
