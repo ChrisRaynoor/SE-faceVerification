@@ -26,13 +26,11 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
 
         # self.authThread = QtCore.QThread()
         self.authenticator = tools.Authenticator()
-        # self.authenticator.moveToThread(self.authThread)
-        # 直接开始工作 作为后台守护线程
-        # self.authThread.started.connect(self.authenticator.initThread)
-        # self.authThread.start()
 
-        # 进行信号槽连接如
-        # self.cameraButton.clicked.connect(self.showDialog)
+        # 要调用camera的lastfram
+        self.authenticator.authTimer.timeout.connect(self.camera.getLatestCroppedAsList)
+        # camera的返回信号要连接verifionce
+        self.camera.latest_cropped_img_asList_signal.connect(self.authenticator.verifyOnce)
         # 登录按钮
         self.login_pushButton.released.connect(self.startLoginWidget)
         # 登出按钮
@@ -41,9 +39,20 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         self.camera.pixmap_change_signal.connect(self.updateCamLabel)
         # todo: 现用于测试的原按钮 测试2 直接使用信号调用
         # 开始auth的行为
-        self.faceAuthenticate_pushButton.released.connect(self.camera.start)
-        self.faceAuthenticate_pushButton.released.connect(self.authenticator.startAuth)
+        self.faceAuthenticate_pushButton.released.connect(self.startAuthOnWindow)
 
+    # 开始验证的一系列行为
+    def startAuthOnWindow(self):
+        # 验证登录
+        if not self.user.loggedIn:
+            QMessageBox.information(self, "Hint", "Please login first.")
+            return
+        # 确定已经登录
+        self.camera.start()
+        faceVector = self.user.getFaceVector()
+        logging.debug(type(faceVector))
+        logging.debug(faceVector)
+        self.authenticator.startAuth(self.user.getFaceVector())
     # 摄像更新
     def updateCamLabel(self, pixmap):
         # logging.debug("try set pixmap")

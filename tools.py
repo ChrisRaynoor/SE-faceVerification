@@ -96,23 +96,16 @@ class Authenticator(QObject):
     """
     need_faceVector_signal = pyqtSignal()
     authResult_signal = pyqtSignal(bool)    # todo 目前返回通过bool
-    def __init__(self, camera, longest_wait_s = 10, accept_required = 3, frame_time = 1):
+    def __init__(self, longest_wait_s = 10, accept_required = 3, frame_time = 1):
         super(Authenticator, self).__init__()
         self.longest_wait_s = longest_wait_s
         self.accept_required = accept_required
         self.frame_time = frame_time
-        # camera
-        self.camera = camera    #MyQCamera
-
         # QTimer
         # 用于间隔尝试进行MTCNN+facenet的timer
         self.authTimer = QTimer()
 
-        # todo 现测试camera作为参数传入是否可行，作为对象应该引用？不行试试套个list.此处强耦合要求camera
-        # 要调用camera的lastfram
-        self.authTimer.timeout.connect(self.camera.getLatestCroppedAsList)
-        # camera的返回信号要连接verifionce
-        self.camera
+        # todo 现测试camera外部连接.此处强耦合要求camera
 
         # 用于判断超时的timer
         self.timeLimitTimer = QTimer()
@@ -120,26 +113,28 @@ class Authenticator(QObject):
         self.timeLimitTimer.timeout.connect(self.retAuthResult)
         # 以下应该在每次完整任务前start时重置
         # 是否通过facenet阶段
+        self.progressMutex = QMutex()
         self.faceVector = None
         self.verificationPass = False
         self.accept_required_left = self.accept_required
         self.passed_frame_storage = list()  # 通过了的thumbnail
 
-    # 发送信号返回验证结果
+    # 发送信号返回验证结果 todo
     # 两种情况:
     # 1. facenet部分超时,直接返回不通过
     # 2. facenet部分通过,进行antispooling,返回是否通过
+    # 完成停止计时器等善后
     def retAuthResult(self):
         # 如果通过第一部分，尝试antispooing
-
+        logging.debug(f"try returning final result at {QThread.currentThreadId()}")
         pass
 
     # todo testing
-    # 一次完整的认证,同样应该用槽或者invoke method调用?
-    # now testing: 槽连接
     def startAuth(self, faceVector):
         # 重置控制量
+        logging.debug(f"start auth at {QThread.currentThreadId()}")
         self.faceVector = faceVector
+        logging.debug(f"Auth class' faceVector {type(self.faceVector)}")
         self.verificationPass = False
         self.accept_required_left = self.accept_required
         self.passed_frame_storage = list()  # 通过了的thumbnail
@@ -154,12 +149,45 @@ class Authenticator(QObject):
     # 和camera连接，收到一个croppedframe后单次裁脸和facenet
     # 创建新线程进行一张图片任务
     # todo 测试低分辨率下的mtcnn用时，调整认证设置
-    def verifyOnce(self, inputFrame):
+    def verifyOnce(self, inputFrameAsList):
         logging.debug(f"authOnce start at {QThread.currentThreadId()}")
-        frame = np.array(inputFrame)
+        frame = np.array(inputFrameAsList)
         # 创建新的工作类并移到线程开始工作
         worker = VerificationWorker(self.faceVector, frame)
-
+        thread = QtCore.QThread()
+        worker.moveToThread(thread)
+        logging.debug("100")
+        # 连接
+        thread.started.connect(worker.runTask)
+        logging.debug("200")
+        # 自定义的finished信号
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        # thread 自带信号
+        thread.finished.connect(thread.deleteLater)
+        # 结果返回信号
+        worker.retVerification_signal.connect(self.checkProgress)
+        # 开始
+        logging.debug("300")
+        thread.start()
+        logging.debug("400")
+    # 由verifyonce返回信号调用，检查当前进度
+    def checkProgress(self, isSameFace, croppedFrameAsList):
+        # todo 由于可能多线程，正在测试对self的访问 如果发现是不同线程，需利用progressMutex
+        #mutex
+        logging.debug(f"tracking progress at {QThread.currentThreadId()}")
+        if isSameFace:
+            self.passed_frame_storage.append(croppedFrameAsList)
+            self.accept_required_left -= 1
+        else:
+            self.passed_frame_storage = list()
+            self.accept_required_left = self.accept_required
+        # 检查是否完全通过
+        if self.accept_required_left <= 0:
+            self.verificationPass = True
+            # 调用re todo
+            self.retAuthResult()
+        # mutex
         pass
 
 # 人脸裁剪加验证worker
@@ -171,7 +199,7 @@ class VerificationWorker(QObject):
     """
     # 信号
     retVerification_signal = pyqtSignal(bool, list)
-
+    finished = pyqtSignal()
     def __init__(self, faceVector, frame):
         super(VerificationWorker, self).__init__()
         self.faceVector = faceVector
@@ -181,9 +209,11 @@ class VerificationWorker(QObject):
         执行长任务,由于连接start,理论上没有实参?
         """
         # 保护网络
+        logging.debug(
+            f"verify task working at {QThread.currentThreadId()}, faceVector{self.faceVector[0, 0:2]}, frame{self.frame[0, 0:3]}")
         mutex.lock()
         emb, croppedFrame = FaceVerifier.get_emb_and_cropped_from_np(frame=self.frame)
-        logging.debug(f"verify task working at {QThread.currentThreadId()}, faceVector{self.faceVector[0,0:2]}, frame{self.frame[0, 0:3]}")
+        
         # 判断是否是人脸
         if croppedFrame is None:    # 非人脸直接返回
             self.retVerification_signal.emit(False, None)
@@ -200,6 +230,7 @@ class VerificationWorker(QObject):
         # 要解除保护，所以不能直接return，除非tryfinally
         mutex.unlock()
         logging.debug(f"verify task return")
+        self.finished.emit()
     pass
 # antispooling worker
 class AntiSpoolingWorker(QObject):
