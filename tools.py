@@ -38,22 +38,35 @@ class FaceVerifier:
         返回（特征，裁剪图），均为ndarray
         没有人脸则均为none
         """
+        logging.debug("3000")
+        logging.debug(f"frame {type(frame)}, {frame[0,0]}")
+        frame = frame.astype(numpy.uint8)
         with torch.no_grad():
             # Get cropped and prewhitened image tensor
             with tempfile.TemporaryDirectory() as tmpDir:
+                logging.debug("3001")
+                logging.debug(f"frame {type(frame)}, {frame.dtype},{frame.shape},{frame[0,0]}")
                 tmpName = "tmpImg.jpg"
-                img_cropped = cls.mtcnn(frame, f"./{tmpDir}/{tmpName}")
+                # img_cropped = cls.mtcnn(frame)
+                # img_cropped = cls.mtcnn(frame, f"./{tmpDir}/{tmpName}")
+                img_cropped = cls.mtcnn(frame, f"{tmpName}")
+                logging.debug("3002")
+                logging.debug(f"isNone:{img_cropped is None}")
                 # 验证是否有人脸
                 if img_cropped is None: # 无人脸
+                    logging.debug("3011")
                     return None, None
                 # 有人脸
                 else:
-                    newImg = Image.open(f"./{tmpDir}/{tmpName}")
+                    logging.debug("3012")
+                    newImg = Image.open(f"{tmpName}")
+                    # newImg = Image.open(f"./{tmpDir}/{tmpName}")
                     copiedImg = newImg.copy()
                     # 转为ndarray
                     resultArr = np.asarray(copiedImg)
                     newImg = None
             # Calculate embedding (unsqueeze to add batch dimension)
+            logging.debug("3020")
             img_embedding = cls.facenetResnet(img_cropped.unsqueeze(0))
             img_embedding = img_embedding.numpy()
         return img_embedding, resultArr
@@ -86,6 +99,9 @@ class FaceVerifier:
         :param emb2: A ndarray of face embedding
         :return: A bool, True if embeddings belongs to the same person
         """
+        # 类型和维度统一
+        emb1 = emb1.astype(numpy.float32).reshape(1, 512)
+        emb2 = emb2.astype(numpy.float32).reshape(1, 512)
         dis = np.linalg.norm(emb1 - emb2)
         return dis <= FACE_VER_THRESHOLD
 
@@ -114,6 +130,8 @@ class Authenticator(QObject):
         # 以下应该在每次完整任务前start时重置
         # 是否通过facenet阶段
         self.progressMutex = QMutex()
+        self.threadList = list()
+        self.verifyWorkerList = list()
         self.faceVector = None
         self.verificationPass = False
         self.accept_required_left = self.accept_required
@@ -127,6 +145,18 @@ class Authenticator(QObject):
     def retAuthResult(self):
         # 如果通过第一部分，尝试antispooing
         logging.debug(f"try returning final result at {QThread.currentThreadId()}")
+        if self.verificationPass:
+            # todo antispooling at new thread
+            self.authResult_signal.emit(True)
+        else:
+            self.authResult_signal.emit(False)
+        # 善后
+        for worker in self.verifyWorkerList:
+            if worker is not None:
+                logging.debug("try exit")
+                worker.finished.emit()
+            else:
+                logging.debug("already exited")
         pass
 
     # todo testing
@@ -138,6 +168,8 @@ class Authenticator(QObject):
         self.verificationPass = False
         self.accept_required_left = self.accept_required
         self.passed_frame_storage = list()  # 通过了的thumbnail
+        self.threadList = list()
+        self.verifyWorkerList = list()
         # logging.debug(f"auth work at {QThread.currentThreadId()}")
         # 开始计时
         self.timeLimitTimer.start(int(self.longest_wait_s * 1000))
@@ -152,9 +184,16 @@ class Authenticator(QObject):
     def verifyOnce(self, inputFrameAsList):
         logging.debug(f"authOnce start at {QThread.currentThreadId()}")
         frame = np.array(inputFrameAsList)
+        # logging.debug(f"before cvt {frame.dtype}, {frame}")
+        frame = frame.astype(numpy.uint8)
+        # logging.debug(f"after cvt {frame.dtype}, {frame}")
         # 创建新的工作类并移到线程开始工作
         worker = VerificationWorker(self.faceVector, frame)
         thread = QtCore.QThread()
+        # 用list保存和维护线程
+        self.verifyWorkerList.append(worker)
+        self.threadList.append(thread)
+
         worker.moveToThread(thread)
         logging.debug("100")
         # 连接
@@ -209,27 +248,41 @@ class VerificationWorker(QObject):
         执行长任务,由于连接start,理论上没有实参?
         """
         # 保护网络
+        logging.debug("1100")
         logging.debug(
-            f"verify task working at {QThread.currentThreadId()}, faceVector{self.faceVector[0, 0:2]}, frame{self.frame[0, 0:3]}")
+            f"verify task working at {QThread.currentThreadId()}, faceVector{self.faceVector[0,0:2]}, frame{self.frame[0, 0:3]}")
         mutex.lock()
+        logging.debug(f"enter mutex lock")
         emb, croppedFrame = FaceVerifier.get_emb_and_cropped_from_np(frame=self.frame)
-        
+        logging.debug("1200")
+        logging.debug(f"croppedFrame{type(croppedFrame)}, {croppedFrame[0,0]}")
         # 判断是否是人脸
         if croppedFrame is None:    # 非人脸直接返回
-            self.retVerification_signal.emit(False, None)
+            self.retVerification_signal.emit(False, list())
+            logging.debug("1201")
         else:
             # 是人脸先验证
+            logging.debug("1202")
+            logging.debug(f"emb{type(emb)}{emb.shape}{emb.dtype}")
+            logging.debug(f"faceVector{type(self.faceVector)}{self.faceVector.shape}{self.faceVector.dtype}")
+
+
             res = FaceVerifier.isSamePersonEmb(emb, self.faceVector)
             # 判断是否通过
             if not res:     # 不通过
-                self.retVerification_signal.emit(False, None)
+                logging.debug("1203")
+                arr = croppedFrame.tolist()
+                self.retVerification_signal.emit(False, arr)
+                logging.debug("1204")
             else:
                 # 转换array才能发送信号
+                logging.debug("1213")
                 arr = croppedFrame.tolist()
                 self.retVerification_signal.emit(True, arr)
         # 要解除保护，所以不能直接return，除非tryfinally
+        logging.debug("1214")
         mutex.unlock()
-        logging.debug(f"verify task return")
+        logging.debug(f"mutex unlock. verify task return")
         self.finished.emit()
     pass
 # antispooling worker

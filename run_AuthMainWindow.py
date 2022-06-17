@@ -40,7 +40,10 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         # todo: 现用于测试的原按钮 测试2 直接使用信号调用
         # 开始auth的行为
         self.faceAuthenticate_pushButton.released.connect(self.startAuthOnWindow)
-
+        # auth return
+        self.authenticator.authResult_signal.connect(self.showAuthResult)
+    def showAuthResult(self, isPass):
+        QMessageBox.information(self, "Hint", f"{'pass' if isPass else 'notpass'}")
     # 开始验证的一系列行为
     def startAuthOnWindow(self):
         # 验证登录
