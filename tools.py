@@ -71,25 +71,6 @@ class FaceVerifier:
             img_embedding = img_embedding.numpy()
         return img_embedding, resultArr
         pass
-    # @classmethod
-    # def getEmb_getCropped(cls, img) -> (numpy.ndarray, PIL.Image):
-    #     """
-    #     返回人脸嵌入和剪裁后的图片
-    #     :param img: A PIL RGB Image that contains face and background
-    #     :return: A tuple: (A ndarray that contains the face embedding, A PIL RGB Image that contains cropped face imaged)
-    #     """
-    #     with torch.no_grad():
-    #         # Get cropped and prewhitened image tensor
-    #         with tempfile.TemporaryDirectory() as tmpDir:
-    #             tmpName = "tmpImg.jpg"
-    #             img_cropped = cls.mtcnn(img, f"./{tmpDir}/{tmpName}")
-    #             newImg = Image.open(f"./{tmpDir}/{tmpName}")
-    #             copiedImg = newImg.copy()
-    #             newImg = None
-    #         # Calculate embedding (unsqueeze to add batch dimension)
-    #         img_embedding = cls.facenetResnet(img_cropped.unsqueeze(0))
-    #         img_embedding = img_embedding.numpy()
-    #     return img_embedding, copiedImg
 
     @classmethod
     def isSamePersonEmb(cls, emb1, emb2) -> bool:
@@ -150,13 +131,27 @@ class Authenticator(QObject):
             self.authResult_signal.emit(True)
         else:
             self.authResult_signal.emit(False)
+        # 停止计时器
+        logging.debug(f"try to stop timer at {QThread.currentThreadId()}")
+        self.authTimer.stop()
+        self.timeLimitTimer.stop()
+        logging.debug("Timer stopped")
         # 善后
-        for worker in self.verifyWorkerList:
-            if worker is not None:
-                logging.debug("try exit")
-                worker.finished.emit()
-            else:
-                logging.debug("already exited")
+        # for worker in self.verifyWorkerList:
+        #     if worker is not None:
+        #         logging.debug("try exit")
+        #
+        #     else:
+        #         logging.debug("already exited")
+        logging.debug(type(self.threadList))
+        # for thread in self.threadList:
+        #     if thread is not None:
+        #         logging.debug("try exit")
+        #         thread.quit()
+        #         logging.debug("exit success")
+        #     else:
+        #         logging.debug("already exited")
+        logging.debug("return res finished")
         pass
 
     # todo testing
@@ -197,7 +192,7 @@ class Authenticator(QObject):
         worker.moveToThread(thread)
         logging.debug("100")
         # 连接
-        thread.started.connect(worker.runTask)
+        thread.started.connect(worker.run)
         logging.debug("200")
         # 自定义的finished信号
         worker.finished.connect(thread.quit)
@@ -213,7 +208,8 @@ class Authenticator(QObject):
     # 由verifyonce返回信号调用，检查当前进度
     def checkProgress(self, isSameFace, croppedFrameAsList):
         # todo 由于可能多线程，正在测试对self的访问 如果发现是不同线程，需利用progressMutex
-        #mutex
+        # mutex
+        self.progressMutex.lock()
         logging.debug(f"tracking progress at {QThread.currentThreadId()}")
         if isSameFace:
             self.passed_frame_storage.append(croppedFrameAsList)
@@ -227,6 +223,7 @@ class Authenticator(QObject):
             # 调用re todo
             self.retAuthResult()
         # mutex
+        self.progressMutex.unlock()
         pass
 
 # 人脸裁剪加验证worker
@@ -243,7 +240,7 @@ class VerificationWorker(QObject):
         super(VerificationWorker, self).__init__()
         self.faceVector = faceVector
         self.frame = frame
-    def runTask(self):
+    def run(self):
         """
         执行长任务,由于连接start,理论上没有实参?
         """
@@ -255,7 +252,7 @@ class VerificationWorker(QObject):
         logging.debug(f"enter mutex lock")
         emb, croppedFrame = FaceVerifier.get_emb_and_cropped_from_np(frame=self.frame)
         logging.debug("1200")
-        logging.debug(f"croppedFrame{type(croppedFrame)}, {croppedFrame[0,0]}")
+        logging.debug(f"croppedFrame{type(croppedFrame)}")
         # 判断是否是人脸
         if croppedFrame is None:    # 非人脸直接返回
             self.retVerification_signal.emit(False, list())
@@ -265,7 +262,6 @@ class VerificationWorker(QObject):
             logging.debug("1202")
             logging.debug(f"emb{type(emb)}{emb.shape}{emb.dtype}")
             logging.debug(f"faceVector{type(self.faceVector)}{self.faceVector.shape}{self.faceVector.dtype}")
-
 
             res = FaceVerifier.isSamePersonEmb(emb, self.faceVector)
             # 判断是否通过

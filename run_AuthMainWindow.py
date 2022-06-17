@@ -43,6 +43,7 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         # auth return
         self.authenticator.authResult_signal.connect(self.showAuthResult)
     def showAuthResult(self, isPass):
+        logging.debug(f"result shown at {QThread.currentThreadId()} it is ui thread?")
         QMessageBox.information(self, "Hint", f"{'pass' if isPass else 'notpass'}")
     # 开始验证的一系列行为
     def startAuthOnWindow(self):
@@ -51,6 +52,7 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
             QMessageBox.information(self, "Hint", "Please login first.")
             return
         # 确定已经登录
+        logging.debug(f"ui thread is {QThread.currentThreadId()}")
         self.camera.start()
         faceVector = self.user.getFaceVector()
         logging.debug(type(faceVector))
