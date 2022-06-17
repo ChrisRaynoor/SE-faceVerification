@@ -10,7 +10,6 @@ from PyQt5.QtCore import QObject, pyqtSignal
 from logging import debug
 
 class User(QObject):
-    # todo
     # 定义该类会发出的信号
     faceVector_get_signal = pyqtSignal(numpy.ndarray)
     # 默认初始化一个空用户

@@ -2,7 +2,7 @@ import logging
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import *
-from PyQt5.QtCore import pyqtSignal,Qt
+from PyQt5.QtCore import pyqtSignal, Qt, QThread
 # import 对应需要的ui_xxx.py的窗口类
 import tools
 from ui_AuthMainWindow import Ui_AuthMainWindow
@@ -21,8 +21,10 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         # 该窗口的对象
         self.user = models.User()
         self.camera = tools.MyQCamera(display_size=CAM_DISPLAY_SIZE, cropped_frame_size=CAM_CROPPED_DISPLAY_SIZE,
-                                      hint_color=CAM_CROPPED_DISPLAY_LINE_RGB)
-
+                                      hint_color=CAM_CROPPED_DISPLAY_LINE_BGR)
+        self.authThread = QtCore.QThread()
+        self.authenticator = tools.Authenticator(None)
+        self.authenticator.moveToThread(self.authThread)
         # 进行信号槽连接如
         # self.cameraButton.clicked.connect(self.showDialog)
         # 登录按钮
@@ -32,7 +34,15 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         # camera更新
         self.camera.pixmap_change_signal.connect(self.updateCamLabel)
         # todo: 现用于测试的原按钮
-        self.faceAuthenticate_pushButton.released.connect(self.camera.start)
+        self.faceAuthenticate_pushButton.released.connect(self.testThread)
+
+    # todo 用于测试线程
+    def testThread(self):
+        self.camera.start()
+        logging.debug(f"thread main thread{QThread.currentThreadId()}")
+        self.authThread.started.connect(self.authenticator.startThreadTest)
+        self.authThread.start()
+
 
     # 摄像更新
     def updateCamLabel(self, pixmap):

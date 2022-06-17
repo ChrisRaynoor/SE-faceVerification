@@ -30,25 +30,26 @@ class FaceVerifier:
     mtcnn = MTCNN(image_size=FACENET_INPUT_IMAGE_SIZE, margin=FACENET_INPUT_MARGIN)
     # pretrained: Either 'vggface2' or 'casia-webface'
     facenetResnet = InceptionResnetV1(pretrained='vggface2').eval()
-
-    @classmethod
-    def getEmb_saveCropped(cls, img, save_path: str = None):
-        """
-        保存MTCNN裁剪的人脸到指定路径,返回人脸嵌入
-        :param img: A PIL RGB Image that contains face and background
-        :param save_path: An optional string that contains the path to save cropped image
-        :return: A ndarray that contains the face embedding
-        """
-        with torch.no_grad():
-            # Get cropped and prewhitened image tensor
-            if save_path is None:
-                img_cropped = cls.mtcnn(img)
-            else:
-                img_cropped = cls.mtcnn(img, save_path)
-            # Calculate embedding (unsqueeze to add batch dimension)
-            img_embedding = cls.facenetResnet(img_cropped.unsqueeze(0))
-            img_embedding = img_embedding.numpy()
-        return img_embedding
+    # todo BUG: 当输入图片没有人脸时，mtcnn返回none，对此需要调整facenet的行为，后面的函数需要改写
+    # 理论上这些方法只能被一个线程调用
+    # @classmethod
+    # def getEmb_saveCropped(cls, img, save_path: str = None):
+    #     """
+    #     保存MTCNN裁剪的人脸到指定路径,返回人脸嵌入
+    #     :param img: A PIL RGB Image that contains face and background
+    #     :param save_path: An optional string that contains the path to save cropped image
+    #     :return: A ndarray that contains the face embedding
+    #     """
+    #     with torch.no_grad():
+    #         # Get cropped and prewhitened image tensor
+    #         if save_path is None:
+    #             img_cropped = cls.mtcnn(img)
+    #         else:
+    #             img_cropped = cls.mtcnn(img, save_path)
+    #         # Calculate embedding (unsqueeze to add batch dimension)
+    #         img_embedding = cls.facenetResnet(img_cropped.unsqueeze(0))
+    #         img_embedding = img_embedding.numpy()
+    #     return img_embedding
 
     @classmethod
     def getEmb_getCropped(cls, img) -> (numpy.ndarray, PIL.Image):
@@ -80,64 +81,82 @@ class FaceVerifier:
         dis = np.linalg.norm(emb1 - emb2)
         return dis <= FACE_VER_THRESHOLD
 
-# class Camera:
-#     """Captures image from selected camera and returns image inside drawed rectangle"""
-#     def __init__(self, cam_num=0, cropped_frame_size=(240, 320)):
-#         """
-#
-#         :param cam_num: camera index, 0 for default camera
-#         :param cropped_frame_size: cropped frame size for camera frame
-#         """
-#         self.cap = cv2.VideoCapture(cam_num)
-#         self.cam_num = cam_num
-#         width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))  # int
-#         height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))  # int
-#         print(f'Webcam image size: ({width}, {height})')  # webcam_size
-#         frame_width = cropped_frame_size[0]
-#         frame_height = cropped_frame_size[1]
-#         self.thickness = 3
-#         self.start_point = ((width - frame_width) // 2, (height - frame_height) // 2)
-#         self.end_point = (self.start_point[0] + frame_width, self.start_point[1] + frame_height)
-#         self.color = (255, 0, 0)
-#
-#     def get_frame(self):
-#         """Returns the next captured image array"""
-#         rval, frame = self.cap.read()
-#         if rval:
-#             frame = cv2.rectangle(frame, tuple(q-self.thickness for q in self.start_point),
-#                                   tuple(q+self.thickness for q in self.end_point),
-#                                   self.color, self.thickness)
-#             # mirrored framed
-#             frame = cv2.flip(frame, 1)
-#             # convert to RGB
-#             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-#         return rval, frame
-#
-# # # todo: validate cropImage()
-# #     def cropImage(self, img):
-# #         """
-# #         get image array slice according to current Camera settings
-# #         :param img: original image
-# #         :return: original image's slice
-# #         """
-# #         cropped_img = img[self.start_point[1]:self.end_point[1],
-# #                       self.start_point[0]:self.end_point[0]]
-# #         return cropped_img
-#
-#     def close_camera(self):
-#         """Releases camera"""
-#         self.cap.release()
+class Authenticator(QObject):
+    """
+    Thread for faceCropping, verification and anti-spooling
+    Move it to a new thread when using
+    """
+    need_faceVector_signal = pyqtSignal()
+    authResult_signal = pyqtSignal(bool)    # todo 目前返回通过bool
+    def __init__(self, faceVector, longest_wait_s = 10, accept_required = 3, frame_time = 1):
+        super(Authenticator, self).__init__()
+        self.longest_wait_s = longest_wait_s
+        self.accept_required = accept_required
+        self.frame_time = frame_time
 
+        # 判断是否在忙的 x不用，在忙直接堵塞
+        # 以下应该在每次start时重置
+        # 是否通过facenet阶段
+        self.verificationPass = False
+        self.accept_required_left = accept_required
+        self.passed_frame_storage = list()  # 通过了的thumbnail
 
+    # # 应由start事件连接
+    # def initThread(self):
+    #     pass
+    # todo 用于测试线程行为 现在问题是如何让这个运行在子线程
+    # Qtimer挪下去？ 是的
+    # Qtimermovetothread?
+    def startThreadTest(self):
+        # 用于间隔尝试进行MTCNN+facenet的timer
+        self.authTimer = QTimer()
+        # 用于判断超时的
+        self.timeLimitTimer = QTimer()
+        self.timeLimitTimer.setSingleShot(True)
+        self.authTimer.timeout.connect(self.threadTest)
+        self.authTimer.start(1)
+        logging.debug(f"thread work start{QThread.currentThreadId()}")
+
+    def threadTest(self):
+        for i in range(100000):
+            pass
+        logging.debug(f"ThreadWorking2{QThread.currentThreadId()}")
+
+    # 发送信号返回验证结果
+    def retAuthResult(self):
+        # 如果通过第一部分，尝试antispooing
+
+        pass
+
+    # 一次完整的认证
+    def startAuth(self):
+        self.timeLimitTimer.start(int(self.longest_wait_s * 1000))
+        self.authTimer.start(int(self.frame_time * 1000))
+        pass
+    # 目前方法下认证到的人脸帧数和最后送到的人脸帧数是一样的
+    # 想要增加最后活体检测用的图片数量，可在camera类中增加缓存的图片数，并加时间戳
+
+    # 和camera连接，收到一个croppedframe后单次裁脸和facenet
+    # todo 测试低分辨率下的mtcnn用时，调整认证设置
+    def verifyOnce(self, arr):
+        narr = np.array(arr)
+
+        pass
 # class AuthThread(QThread):
 #     """
 #     Thread for faceCropping, verification and anti-spooling
 #     """
-#     get_faceVector_signal = pyqtSignal()
+#     need_faceVector_signal = pyqtSignal()
 #     set_faceVector_signal = pyqtSignal(numpy.ndarray)
 #     # get_frame_signal = pyqtSignal()
 #     def __init__(self, parent=None):
 #         QThread.__init__(self, parent=parent)
+#
+#     # 这个线程应该进行一次完整的识别任务
+#     def run(self):
+#         # 先获取faceVector
+#         self.need_faceVector_signal.emit()
+
 
 # class CameraThread(QThread):
 #     """
@@ -187,14 +206,14 @@ class MyQCamera(QObject):
     # 信号
 
     pixmap_change_signal = pyqtSignal(QPixmap)
-    # latest_cropped_PIL_signal = pyqtSignal(PIL.Image) # todo 类型不支持
+    latest_cropped_img_asList_signal = pyqtSignal(list)
     #
     # get_faceVector_signal = pyqtSignal()
     # set_faceVector_signal = pyqtSignal(numpy.ndarray)
 
     def __init__(self, cam_num=0, display_size = (640, 480),cropped_frame_size=(240, 320), hint_color=(255, 0, 0), frame_rate=25):
         super(MyQCamera, self).__init__()
-        self.cap = cv2.VideoCapture(cam_num)
+        self.cap = cv2.VideoCapture(cam_num, cv2.CAP_DSHOW)
         self.cam_num = cam_num
         self.display_size = display_size
 
@@ -264,14 +283,14 @@ class MyQCamera(QObject):
             logging.debug("pixmap converted")
             self.pixmap_change_signal.emit(pixmap)
             logging.debug("pixmap send")
-    # todo 类型不支持
-    # def getLatestCroppedPIL(self):
-    #     if self.latestCroppedFrame is None:
-    #         self.latest_cropped_PIL_signal.emit(None)
-    #     else:
-    #         image = Image.fromarray(self.latestCroppedFrame)
-    #         self.latest_cropped_PIL_signal.emit(image)
-    #     pass
+    def getLatestCroppedAsList(self):
+        if self.latestCroppedFrame is None:
+            self.latest_cropped_img_asList_signal.emit(None)
+        else:
+            #image = Image.fromarray(self.latestCroppedFrame)
+            narr = self.latestCroppedFrame.copy()
+            self.latest_cropped_img_asList_signal.emit(narr.tolist())
+        pass
 
     def closeCamera(self):
         """
@@ -281,7 +300,7 @@ class MyQCamera(QObject):
 
     # 开始图像采集
     def start(self):
-        self.captureTimer.start(self.frame_time * 1000)
+        self.captureTimer.start(int(self.frame_time * 1000))
 
     # 停止图像采集
     def pause(self):

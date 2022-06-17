@@ -94,7 +94,7 @@ if __name__ == "__main__":
     # print(type(arr))
     # print(arr)
 
-# todo
+# todo 数据库操作优化，可忽略
 # 采用每次操作都连接和断开数据库的模式
 # 会不会重复创建连接
 # 连接断开的处理
