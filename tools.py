@@ -209,7 +209,7 @@ class Authenticator(QObject):
     def checkProgress(self, isSameFace, croppedFrameAsList):
         # todo 由于可能多线程，正在测试对self的访问 如果发现是不同线程，需利用progressMutex
         # mutex
-        self.progressMutex.lock()
+        # self.progressMutex.lock()
         logging.debug(f"tracking progress at {QThread.currentThreadId()}")
         if isSameFace:
             self.passed_frame_storage.append(croppedFrameAsList)
@@ -223,7 +223,7 @@ class Authenticator(QObject):
             # 调用re todo
             self.retAuthResult()
         # mutex
-        self.progressMutex.unlock()
+        # self.progressMutex.unlock()
         pass
 
 # 人脸裁剪加验证worker

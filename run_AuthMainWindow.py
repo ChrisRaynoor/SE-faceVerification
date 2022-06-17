@@ -55,8 +55,8 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         logging.debug(f"ui thread is {QThread.currentThreadId()}")
         self.camera.start()
         faceVector = self.user.getFaceVector()
-        logging.debug(type(faceVector))
-        logging.debug(faceVector)
+        # logging.debug(type(faceVector))
+        # logging.debug(faceVector)
         self.authenticator.startAuth(self.user.getFaceVector())
     # 摄像更新
     def updateCamLabel(self, pixmap):
