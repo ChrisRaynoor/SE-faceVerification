@@ -6,7 +6,7 @@ import time
 import numpy
 import cv2
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import QThread, QObject, pyqtSignal, QTimer
+from PyQt5.QtCore import QThread, QObject, pyqtSignal, QTimer, QMutex
 from PyQt5.QtGui import QImage, QPixmap
 
 import mydb
@@ -21,10 +21,9 @@ from PIL import Image
 from facenet_pytorch import MTCNN, InceptionResnetV1
 from settings import *
 
-# face Verification function
+# 用于保护网络资源的mutex todo（暂不确定mtcnn和facenet的线程安全性）
+mutex = QMutex()
 
-
-# end faceVerification function
 class FaceVerifier:
     # 初始化网络
     mtcnn = MTCNN(image_size=FACENET_INPUT_IMAGE_SIZE, margin=FACENET_INPUT_MARGIN)
@@ -32,44 +31,53 @@ class FaceVerifier:
     facenetResnet = InceptionResnetV1(pretrained='vggface2').eval()
     # todo BUG: 当输入图片没有人脸时，mtcnn返回none，对此需要调整facenet的行为，后面的函数需要改写
     # 理论上这些方法只能被一个线程调用
-    # @classmethod
-    # def getEmb_saveCropped(cls, img, save_path: str = None):
-    #     """
-    #     保存MTCNN裁剪的人脸到指定路径,返回人脸嵌入
-    #     :param img: A PIL RGB Image that contains face and background
-    #     :param save_path: An optional string that contains the path to save cropped image
-    #     :return: A ndarray that contains the face embedding
-    #     """
-    #     with torch.no_grad():
-    #         # Get cropped and prewhitened image tensor
-    #         if save_path is None:
-    #             img_cropped = cls.mtcnn(img)
-    #         else:
-    #             img_cropped = cls.mtcnn(img, save_path)
-    #         # Calculate embedding (unsqueeze to add batch dimension)
-    #         img_embedding = cls.facenetResnet(img_cropped.unsqueeze(0))
-    #         img_embedding = img_embedding.numpy()
-    #     return img_embedding
-
     @classmethod
-    def getEmb_getCropped(cls, img) -> (numpy.ndarray, PIL.Image):
+    def get_emb_and_cropped_from_np(cls, frame):
         """
-        返回人脸嵌入和剪裁后的图片
-        :param img: A PIL RGB Image that contains face and background
-        :return: A tuple: (A ndarray that contains the face embedding, A PIL RGB Image that contains cropped face imaged)
+        裁剪和识别
+        返回（特征，裁剪图），均为ndarray
+        没有人脸则均为none
         """
         with torch.no_grad():
             # Get cropped and prewhitened image tensor
             with tempfile.TemporaryDirectory() as tmpDir:
                 tmpName = "tmpImg.jpg"
-                img_cropped = cls.mtcnn(img, f"./{tmpDir}/{tmpName}")
-                newImg = Image.open(f"./{tmpDir}/{tmpName}")
-                copiedImg = newImg.copy()
-                newImg = None
+                img_cropped = cls.mtcnn(frame, f"./{tmpDir}/{tmpName}")
+                # 验证是否有人脸
+                if img_cropped is None: # 无人脸
+                    return None, None
+                # 有人脸
+                else:
+                    newImg = Image.open(f"./{tmpDir}/{tmpName}")
+                    copiedImg = newImg.copy()
+                    # 转为ndarray
+                    resultArr = np.asarray(copiedImg)
+                    newImg = None
             # Calculate embedding (unsqueeze to add batch dimension)
             img_embedding = cls.facenetResnet(img_cropped.unsqueeze(0))
             img_embedding = img_embedding.numpy()
-        return img_embedding, copiedImg
+        return img_embedding, resultArr
+        pass
+    # @classmethod
+    # def getEmb_getCropped(cls, img) -> (numpy.ndarray, PIL.Image):
+    #     """
+    #     返回人脸嵌入和剪裁后的图片
+    #     :param img: A PIL RGB Image that contains face and background
+    #     :return: A tuple: (A ndarray that contains the face embedding, A PIL RGB Image that contains cropped face imaged)
+    #     """
+    #     with torch.no_grad():
+    #         # Get cropped and prewhitened image tensor
+    #         with tempfile.TemporaryDirectory() as tmpDir:
+    #             tmpName = "tmpImg.jpg"
+    #             img_cropped = cls.mtcnn(img, f"./{tmpDir}/{tmpName}")
+    #             newImg = Image.open(f"./{tmpDir}/{tmpName}")
+    #             copiedImg = newImg.copy()
+    #             newImg = None
+    #         # Calculate embedding (unsqueeze to add batch dimension)
+    #         img_embedding = cls.facenetResnet(img_cropped.unsqueeze(0))
+    #         img_embedding = img_embedding.numpy()
+    #     return img_embedding, copiedImg
+
     @classmethod
     def isSamePersonEmb(cls, emb1, emb2) -> bool:
         """
@@ -88,35 +96,39 @@ class Authenticator(QObject):
     """
     need_faceVector_signal = pyqtSignal()
     authResult_signal = pyqtSignal(bool)    # todo 目前返回通过bool
-    def __init__(self, faceVector, longest_wait_s = 10, accept_required = 3, frame_time = 1):
+    def __init__(self, camera, longest_wait_s = 10, accept_required = 3, frame_time = 1):
         super(Authenticator, self).__init__()
         self.longest_wait_s = longest_wait_s
         self.accept_required = accept_required
         self.frame_time = frame_time
+        # camera
+        self.camera = camera    #MyQCamera
 
-        # 判断是否在忙的 x不用，在忙直接堵塞
-        # 以下应该在每次start时重置
-        # 是否通过facenet阶段
-        self.verificationPass = False
-        self.accept_required_left = accept_required
-        self.passed_frame_storage = list()  # 通过了的thumbnail
-
-    # todo testing
-    # 应由start事件连接
-    def initThread(self):
-        logging.debug(f"auth thread init at {QThread.currentThreadId()}")
+        # QTimer
         # 用于间隔尝试进行MTCNN+facenet的timer
         self.authTimer = QTimer()
-        # todo 测试中
-        self.authTimer.timeout.connect(self.verifyOnce)
+
+        # todo 现测试camera作为参数传入是否可行，作为对象应该引用？不行试试套个list.此处强耦合要求camera
+        # 要调用camera的lastfram
+        self.authTimer.timeout.connect(self.camera.getLatestCroppedAsList)
+        # camera的返回信号要连接verifionce
+        self.camera
+
         # 用于判断超时的timer
         self.timeLimitTimer = QTimer()
         self.timeLimitTimer.setSingleShot(True)
-        # todo testing 是否需要exec开始事件循环
-        exec()
-        pass
+        self.timeLimitTimer.timeout.connect(self.retAuthResult)
+        # 以下应该在每次完整任务前start时重置
+        # 是否通过facenet阶段
+        self.faceVector = None
+        self.verificationPass = False
+        self.accept_required_left = self.accept_required
+        self.passed_frame_storage = list()  # 通过了的thumbnail
 
     # 发送信号返回验证结果
+    # 两种情况:
+    # 1. facenet部分超时,直接返回不通过
+    # 2. facenet部分通过,进行antispooling,返回是否通过
     def retAuthResult(self):
         # 如果通过第一部分，尝试antispooing
 
@@ -125,78 +137,74 @@ class Authenticator(QObject):
     # todo testing
     # 一次完整的认证,同样应该用槽或者invoke method调用?
     # now testing: 槽连接
-    def startAuth(self):
-        logging.debug(f"auth work at {QThread.currentThreadId()}")
+    def startAuth(self, faceVector):
+        # 重置控制量
+        self.faceVector = faceVector
+        self.verificationPass = False
+        self.accept_required_left = self.accept_required
+        self.passed_frame_storage = list()  # 通过了的thumbnail
+        # logging.debug(f"auth work at {QThread.currentThreadId()}")
+        # 开始计时
         self.timeLimitTimer.start(int(self.longest_wait_s * 1000))
-        # todo 目前修改间隔 *10便于测试
-        # self.authTimer.start(int(self.frame_time * 1000))
-        self.authTimer.start(int(self.frame_time * 10))
+        self.authTimer.start(int(self.frame_time * 1000))
         pass
     # 目前方法下认证到的人脸帧数和最后送到的人脸帧数是一样的
     # 想要增加最后活体检测用的图片数量，可在camera类中增加缓存的图片数，并加时间戳
 
     # 和camera连接，收到一个croppedframe后单次裁脸和facenet
+    # 创建新线程进行一张图片任务
     # todo 测试低分辨率下的mtcnn用时，调整认证设置
-    def verifyOnce(self, arr = None):
-        logging.debug(f"authOnce work at {QThread.currentThreadId()}")
-        # narr = np.array(arr)
+    def verifyOnce(self, inputFrame):
+        logging.debug(f"authOnce start at {QThread.currentThreadId()}")
+        frame = np.array(inputFrame)
+        # 创建新的工作类并移到线程开始工作
+        worker = VerificationWorker(self.faceVector, frame)
 
         pass
-# class AuthThread(QThread):
-#     """
-#     Thread for faceCropping, verification and anti-spooling
-#     """
-#     need_faceVector_signal = pyqtSignal()
-#     set_faceVector_signal = pyqtSignal(numpy.ndarray)
-#     # get_frame_signal = pyqtSignal()
-#     def __init__(self, parent=None):
-#         QThread.__init__(self, parent=parent)
-#
-#     # 这个线程应该进行一次完整的识别任务
-#     def run(self):
-#         # 先获取faceVector
-#         self.need_faceVector_signal.emit()
 
+# 人脸裁剪加验证worker
+class VerificationWorker(QObject):
+    """
+    人脸裁剪加验证worker
+    输入:通过构造函数获取facevector(?needtest)
+    输出:通过信号返回人脸是否通过,通过人脸的剪裁array
+    """
+    # 信号
+    retVerification_signal = pyqtSignal(bool, list)
 
-# class CameraThread(QThread):
-#     """
-#     单帧图像捕获
-#     接收
-#     """
-#     # 信号
-#     change_pixmap = pyqtSignal(QImage)
-#     get_faceVector_signal = pyqtSignal()
-#     set_faceVector_signal = pyqtSignal(numpy.ndarray)
-#
-#     def __init__(self, parent=None, camera=None, capture_only=True, frame_rate=25, verify_time=0.6):
-#         QThread.__init__(self, parent=parent)
-#         self.camera = camera
-#         self.frame_time = 1.0 / frame_rate
-#         self.capture_only = capture_only
-#
-#     # 重写run()定义QThread行为
-#     # 任务:
-#     # 创建时有capture_only:不进行识别,仅充当捕获
-#     # 按照帧时进行图片捕获,发送信号(由UI接收并显示)
-#     # 按照处理时长间隔将裁剪框内图片送入mctnn-resnet
-#     def run(self):
-#         """Runs camera capture"""
-#         prev = time.time()
-#         while True:
-#             now = time.time()
-#             # 先判断是否需要，不需要则可sleep到下次开始
-#             if
-#             # 图像提取框
-#             rval, frame = self.camera.get_frame()
-#             # 转换图片格式
-#             if rval:
-#                 convert_qt_format = cvt_img_to_qimage(frame)
-#                 qt_img = convert_qt_format.scaled(640, 480, Qt.KeepAspectRatio)
-#                 if (now - prev) >= self.frame_time:
-#                     # 发射信号，执行它所连接的函数
-#                     self.change_pixmap.emit(qt_img)
-#                     prev = now
-# # #
+    def __init__(self, faceVector, frame):
+        super(VerificationWorker, self).__init__()
+        self.faceVector = faceVector
+        self.frame = frame
+    def runTask(self):
+        """
+        执行长任务,由于连接start,理论上没有实参?
+        """
+        # 保护网络
+        mutex.lock()
+        emb, croppedFrame = FaceVerifier.get_emb_and_cropped_from_np(frame=self.frame)
+        logging.debug(f"verify task working at {QThread.currentThreadId()}, faceVector{self.faceVector[0,0:2]}, frame{self.frame[0, 0:3]}")
+        # 判断是否是人脸
+        if croppedFrame is None:    # 非人脸直接返回
+            self.retVerification_signal.emit(False, None)
+        else:
+            # 是人脸先验证
+            res = FaceVerifier.isSamePersonEmb(emb, self.faceVector)
+            # 判断是否通过
+            if not res:     # 不通过
+                self.retVerification_signal.emit(False, None)
+            else:
+                # 转换array才能发送信号
+                arr = croppedFrame.tolist()
+                self.retVerification_signal.emit(True, arr)
+        # 要解除保护，所以不能直接return，除非tryfinally
+        mutex.unlock()
+        logging.debug(f"verify task return")
+    pass
+# antispooling worker
+class AntiSpoolingWorker(QObject):
+    pass
+
 # 更进一步这个可写成自定义控件直接放UI里
 class MyQCamera(QObject):
     """

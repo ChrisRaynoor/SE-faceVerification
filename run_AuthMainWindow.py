@@ -23,13 +23,13 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         self.user = models.User()
         self.camera = tools.MyQCamera(display_size=CAM_DISPLAY_SIZE, cropped_frame_size=CAM_CROPPED_DISPLAY_SIZE,
                                       hint_color=CAM_CROPPED_DISPLAY_LINE_BGR)
-        # 预计于新线程工作的类
-        self.authThread = QtCore.QThread()
-        self.authenticator = tools.Authenticator(None)
-        self.authenticator.moveToThread(self.authThread)
+
+        # self.authThread = QtCore.QThread()
+        self.authenticator = tools.Authenticator()
+        # self.authenticator.moveToThread(self.authThread)
         # 直接开始工作 作为后台守护线程
-        self.authThread.started.connect(self.authenticator.initThread)
-        self.authThread.start()
+        # self.authThread.started.connect(self.authenticator.initThread)
+        # self.authThread.start()
 
         # 进行信号槽连接如
         # self.cameraButton.clicked.connect(self.showDialog)
@@ -43,19 +43,6 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         # 开始auth的行为
         self.faceAuthenticate_pushButton.released.connect(self.camera.start)
         self.faceAuthenticate_pushButton.released.connect(self.authenticator.startAuth)
-
-    # # todo testing: invoke method
-    # # 开始一次完整验证，作为验证按钮槽函数
-    # def startAuthentication(self):
-    #     logging.debug(f"auth button pushed at {QThread.currentThreadId()}")
-    #     self.camera.start()
-    #     logging.debug(f"camera started")
-    #     # testing direct call: failed
-    #     # self.authenticator.startAuth()
-    #     # testing invoke failed
-    #     QtCore.QMetaObject.invokeMethod(self.authenticator, 'startAuth', QtCore.Qt.QueuedConnection)
-    #     logging.debug(f"invoke method return")
-
 
     # 摄像更新
     def updateCamLabel(self, pixmap):
@@ -98,8 +85,6 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         else:
             # 未登录
             QMessageBox.information(self, "Hint", "Please login first.")
-
-    # 图像捕获任务
 # debug
 if __name__ == "__main__":
     import sys
