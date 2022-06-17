@@ -101,26 +101,20 @@ class Authenticator(QObject):
         self.accept_required_left = accept_required
         self.passed_frame_storage = list()  # 通过了的thumbnail
 
-    # # 应由start事件连接
-    # def initThread(self):
-    #     pass
-    # todo 用于测试线程行为 现在问题是如何让这个运行在子线程
-    # Qtimer挪下去？ 是的
-    # Qtimermovetothread?
-    def startThreadTest(self):
+    # todo testing
+    # 应由start事件连接
+    def initThread(self):
+        logging.debug(f"auth thread init at {QThread.currentThreadId()}")
         # 用于间隔尝试进行MTCNN+facenet的timer
         self.authTimer = QTimer()
-        # 用于判断超时的
+        # todo 测试中
+        self.authTimer.timeout.connect(self.verifyOnce)
+        # 用于判断超时的timer
         self.timeLimitTimer = QTimer()
         self.timeLimitTimer.setSingleShot(True)
-        self.authTimer.timeout.connect(self.threadTest)
-        self.authTimer.start(1)
-        logging.debug(f"thread work start{QThread.currentThreadId()}")
-
-    def threadTest(self):
-        for i in range(100000):
-            pass
-        logging.debug(f"ThreadWorking2{QThread.currentThreadId()}")
+        # todo testing 是否需要exec开始事件循环
+        exec()
+        pass
 
     # 发送信号返回验证结果
     def retAuthResult(self):
@@ -128,18 +122,24 @@ class Authenticator(QObject):
 
         pass
 
-    # 一次完整的认证
+    # todo testing
+    # 一次完整的认证,同样应该用槽或者invoke method调用?
+    # now testing: 槽连接
     def startAuth(self):
+        logging.debug(f"auth work at {QThread.currentThreadId()}")
         self.timeLimitTimer.start(int(self.longest_wait_s * 1000))
-        self.authTimer.start(int(self.frame_time * 1000))
+        # todo 目前修改间隔 *10便于测试
+        # self.authTimer.start(int(self.frame_time * 1000))
+        self.authTimer.start(int(self.frame_time * 10))
         pass
     # 目前方法下认证到的人脸帧数和最后送到的人脸帧数是一样的
     # 想要增加最后活体检测用的图片数量，可在camera类中增加缓存的图片数，并加时间戳
 
     # 和camera连接，收到一个croppedframe后单次裁脸和facenet
     # todo 测试低分辨率下的mtcnn用时，调整认证设置
-    def verifyOnce(self, arr):
-        narr = np.array(arr)
+    def verifyOnce(self, arr = None):
+        logging.debug(f"authOnce work at {QThread.currentThreadId()}")
+        # narr = np.array(arr)
 
         pass
 # class AuthThread(QThread):
@@ -226,10 +226,10 @@ class MyQCamera(QObject):
         frame_height = cropped_frame_size[1]
         self.thickness = 3
         self.start_point = ((width - frame_width) // 2, (height - frame_height) // 2)
-        logging.debug(f"{width} {frame_width} {height} {frame_height} {(width - frame_width) / 2}")
-        logging.debug(self.start_point)
+        # logging.debug(f"{width} {frame_width} {height} {frame_height} {(width - frame_width) / 2}")
+        # logging.debug(self.start_point)
         self.end_point = (self.start_point[0] + frame_width, self.start_point[1] + frame_height)
-        logging.debug(self.end_point)
+        # logging.debug(self.end_point)
         self.hint_color = hint_color
         self.frame_rate = frame_rate
         self.frame_time = 1.0 / frame_rate
@@ -243,11 +243,11 @@ class MyQCamera(QObject):
 
     def __getFrame(self):
         """Returns the next captured image array"""
-        logging.info("getnewframe")
+        # logging.info("getnewframe")
         rval, frame = self.cap.read()
-        logging.debug("1")
+        # logging.debug("1")
         if rval:
-            logging.debug("2")
+            # logging.debug("2")
             frame = cv2.rectangle(frame, tuple(q - self.thickness for q in self.start_point),
                                   tuple(q + self.thickness for q in self.end_point),
                                   self.hint_color, self.thickness)
@@ -261,28 +261,29 @@ class MyQCamera(QObject):
             cropped_img = cropped_img[self.start_point[1]:self.end_point[1],
                           self.start_point[0]:self.end_point[0]]
             self.latestCroppedFrame = cropped_img
-            logging.debug("3")
+            # logging.debug("3")
         return rval, frame
 
     def getNewFrame_QPixmap(self):
+        logging.debug(f"camera working at {QThread.currentThreadId()}")
         rval, frame = self.__getFrame()
-        logging.debug("21")
+        # logging.debug("21")
         if rval:
             # frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGRA)
-            logging.debug("22")
+            # logging.debug("22")
             # array frame to pixmap
-            logging.debug(type(frame))
-            logging.debug(frame)
-            logging.debug(frame.shape)
-            logging.debug(frame.dtype)
+            # logging.debug(type(frame))
+            # logging.debug(frame)
+            # logging.debug(frame.shape)
+            # logging.debug(frame.dtype)
             image = QtGui.QImage(frame.data, frame.shape[1], frame.shape[0], QtGui.QImage.Format_RGB888)
-            logging.debug("23")
+            # logging.debug("23")
 
             pixmap = QtGui.QPixmap(image).scaled(self.display_size[0], self.display_size[1],
                                                  aspectRatioMode=QtCore.Qt.KeepAspectRatio)
-            logging.debug("pixmap converted")
+            # logging.debug("pixmap converted")
             self.pixmap_change_signal.emit(pixmap)
-            logging.debug("pixmap send")
+            # logging.debug("pixmap send")
     def getLatestCroppedAsList(self):
         if self.latestCroppedFrame is None:
             self.latest_cropped_img_asList_signal.emit(None)
@@ -301,6 +302,7 @@ class MyQCamera(QObject):
     # 开始图像采集
     def start(self):
         self.captureTimer.start(int(self.frame_time * 1000))
+        logging.debug(f"camera started at {QThread.currentThreadId()}")
 
     # 停止图像采集
     def pause(self):
