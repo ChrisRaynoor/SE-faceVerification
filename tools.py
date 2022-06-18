@@ -2,7 +2,8 @@
 # 工具函数和类
 import logging
 import time
-
+import utils
+from joblib import load
 import numpy
 import cv2
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -23,7 +24,8 @@ from settings import *
 
 # 用于保护网络资源的mutex todo（暂不确定mtcnn和facenet的线程安全性）
 mutex = QMutex()
-
+#svm
+svm = load("ycbcr_svm.m")
 class FaceVerifier:
     # 初始化网络
     mtcnn = MTCNN(image_size=FACENET_INPUT_IMAGE_SIZE, margin=FACENET_INPUT_MARGIN)
@@ -112,12 +114,27 @@ class Authenticator(QObject):
         # 是否通过facenet阶段
         self.progressMutex = QMutex()
         self.threadList = list()
+        self.antiThread = None
+        self.antiWorker = None
         self.verifyWorkerList = list()
         self.faceVector = None
         self.verificationPass = False
         self.accept_required_left = self.accept_required
         self.passed_frame_storage = list()  # 通过了的thumbnail
-
+    # 由antispooling返回结果
+    def retAuthWithAnti(self):
+        logging.debug(f"try anti spooling")
+        self.antiThread = QThread()
+        self.antiWorker = AntiSpoolingWorker(self.passed_frame_storage)
+        self.antiWorker.moveToThread(self.antiThread)
+        self.antiThread.started.connect(self.antiWorker.run)
+        self.antiWorker.finished.connect(self.antiThread.quit)
+        self.antiWorker.finished.connect(self.antiWorker.deleteLater)
+        self.antiThread.finished.connect(self.antiThread.deleteLater)
+        self.antiWorker.retResult_signal.connect(self.retFinalAuth)
+        self.antiThread.start()
+    def retFinalAuth(self, res):
+        self.authResult_signal.emit(res)
     # 发送信号返回验证结果 todo
     # 两种情况:
     # 1. facenet部分超时,直接返回不通过
@@ -128,7 +145,17 @@ class Authenticator(QObject):
         logging.debug(f"try returning final result at {QThread.currentThreadId()}")
         if self.verificationPass:
             # todo antispooling at new thread
-            self.authResult_signal.emit(True)
+            # # testing: at current thread, call 可行
+            # logging.debug("4000")
+            # logging.debug(f"svm{type(svm)}, list{type(self.passed_frame_storage)}, lenlist{len(self.passed_frame_storage)}")
+            # logging.debug(f"frame type {type(self.passed_frame_storage[-1])}. frame dtype {self.passed_frame_storage[-1].dtype}")
+            # res, _ = utils.anti_spoofing(self.passed_frame_storage, svm)
+            # logging.debug(f"res {type(res)}")
+            # if res:
+            #     self.authResult_signal.emit(True)
+            # else:
+            #     self.authResult_signal.emit(False)
+            self.retAuthWithAnti()
         else:
             self.authResult_signal.emit(False)
         # 停止计时器
@@ -158,13 +185,17 @@ class Authenticator(QObject):
     def startAuth(self, faceVector):
         # 重置控制量
         logging.debug(f"start auth at {QThread.currentThreadId()}")
+        # 以下应该在每次完整任务前start时重置
+        # 是否通过facenet阶段
+        self.progressMutex = QMutex()
+        self.threadList = list()
+        self.antiThread = None
+        self.antiWorker = None
+        self.verifyWorkerList = list()
         self.faceVector = faceVector
-        logging.debug(f"Auth class' faceVector {type(self.faceVector)}")
         self.verificationPass = False
         self.accept_required_left = self.accept_required
         self.passed_frame_storage = list()  # 通过了的thumbnail
-        self.threadList = list()
-        self.verifyWorkerList = list()
         # logging.debug(f"auth work at {QThread.currentThreadId()}")
         # 开始计时
         self.timeLimitTimer.start(int(self.longest_wait_s * 1000))
@@ -212,7 +243,7 @@ class Authenticator(QObject):
         # self.progressMutex.lock()
         logging.debug(f"tracking progress at {QThread.currentThreadId()}")
         if isSameFace:
-            self.passed_frame_storage.append(croppedFrameAsList)
+            self.passed_frame_storage.append(np.array(croppedFrameAsList).astype(numpy.uint8))
             self.accept_required_left -= 1
         else:
             self.passed_frame_storage = list()
@@ -246,6 +277,7 @@ class VerificationWorker(QObject):
         """
         # 保护网络
         logging.debug("1100")
+        logging.debug(f"facevector type{type(self.faceVector)}")
         logging.debug(
             f"verify task working at {QThread.currentThreadId()}, faceVector{self.faceVector[0,0:2]}, frame{self.frame[0, 0:3]}")
         mutex.lock()
@@ -283,6 +315,17 @@ class VerificationWorker(QObject):
     pass
 # antispooling worker
 class AntiSpoolingWorker(QObject):
+    finished = pyqtSignal()
+    retResult_signal = pyqtSignal(bool)
+
+    def __init__(self, frameList):
+        super(AntiSpoolingWorker, self).__init__()
+        self.frameList = frameList
+
+    def run(self):
+        res, _ = utils.anti_spoofing(self.frameList, svm)
+        self.retResult_signal.emit(res)
+        self.finished.emit()
     pass
 
 # 更进一步这个可写成自定义控件直接放UI里
