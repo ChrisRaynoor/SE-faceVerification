@@ -1,5 +1,6 @@
 import logging
 
+import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import pyqtSignal, Qt, QThread
@@ -19,11 +20,13 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         super(AuthMainWindow, self).__init__(parent)
         self.setupUi(self)#self?
         # logging.debug(f"main thread {QThread.currentThreadId()}")
+        # 状态变量
+        self.authenticating = False
         # 该窗口的对象
         self.user = models.User()
         self.camera = tools.MyQCamera(display_size=CAM_DISPLAY_SIZE, cropped_frame_size=CAM_CROPPED_DISPLAY_SIZE,
                                       hint_color=CAM_CROPPED_DISPLAY_LINE_BGR)
-
+        self.camera.start()
         # self.authThread = QtCore.QThread()
         self.authenticator = tools.Authenticator()
 
@@ -37,11 +40,12 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         self.logout_pushButton.released.connect(self.logout)
         # camera更新
         self.camera.pixmap_change_signal.connect(self.updateCamLabel)
-        # todo: 现用于测试的原按钮 测试2 直接使用信号调用
         # 开始auth的行为
         self.faceAuthenticate_pushButton.released.connect(self.startAuthOnWindow)
         # auth return
         self.authenticator.authResult_signal.connect(self.showAuthResult)
+        # 注册人脸
+        # self.registerFace_pushButton.released.connect(self.registerFace)
     def showAuthResult(self, isPass):
         logging.debug(f"result shown at {QThread.currentThreadId()} it is ui thread?")
         QMessageBox.information(self, "Hint", f"{'pass' if isPass else 'notpass'}")
@@ -51,9 +55,12 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
         if not self.user.loggedIn:
             QMessageBox.information(self, "Hint", "Please login first.")
             return
-        # 确定已经登录
+        # 确认有人脸
+        if self.user.getFaceVector() is None:
+            QMessageBox.information(self, "Hint", "Please register face first")
+            return
         logging.debug(f"ui thread is {QThread.currentThreadId()}")
-        self.camera.start()
+        # self.camera.start()
         faceVector = self.user.getFaceVector()
         # logging.debug(type(faceVector))
         # logging.debug(faceVector)
@@ -80,6 +87,7 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
     def login(self, username, password):
         if self.user.login(username, password):
             # 登录成功
+            self.username_label_5.setText(self.user.username)
             QMessageBox.information(self, "Hint", "Login success.")
         else:
             # 登陆失败
@@ -87,18 +95,68 @@ class AuthMainWindow(QMainWindow, Ui_AuthMainWindow):
 
     # 登出按钮槽
     def logout(self):
+        # 判断是否在认证
+        if self.authenticating:
+            QMessageBox.information(self, "Hint", "Face authentication in progress, please wait.")
+            return
         # 判断是否已经登录
-        if self.user.loggedIn:
-            # 已登录
-            reply = QMessageBox.question(self, "Logout", "Are you sure to log out?")
-            # 是否确定登出
-            if reply == QMessageBox.Yes:
-                self.user.logout()
-            # else: do nothing
-            pass
-        else:
+        if not self.user.loggedIn:
             # 未登录
             QMessageBox.information(self, "Hint", "Please login first.")
+            return
+        # 已登录
+        reply = QMessageBox.question(self, "Logout", "Are you sure to log out?")
+        # 是否确定登出
+        if reply == QMessageBox.Yes:
+            self.user.logout()
+            self.username_label_5.setText("not logged in")
+        # else: do nothing
+    # # 注册人脸槽
+    # def registerFace(self):
+    #     "this is for demonstration purpose"
+    #     # 判断是否已经登录
+    #     if not self.user.loggedIn:
+    #         # 未登录
+    #         QMessageBox.information(self, "Hint", "Please login first.")
+    #         return
+    #     # 是否在验证
+    #     if self.authenticating:
+    #         QMessageBox.information(self, "Hint", "Face authentication in progress, please wait")
+    #         return
+    #     # 判断是否已注册
+    #     if self.user.getFaceVector() is not None:
+    #         # 已注册
+    #         QMessageBox.information(self, "Hint", "The account's face information has been registered.\n"
+    #                                               "Please contact the administrator to update face information.")
+    #         return
+    #     # 未注册
+    #     frame = self.camera.getLatestCroppedAsList()
+    #     image = QtGui.QImage(frame.data, frame.shape[1], frame.shape[0], QtGui.QImage.Format_RGB888)
+    #     # logging.debug("23")
+    #     pixmap = QtGui.QPixmap(image).scaled(self.display_size[0], self.display_size[1],
+    #                                          aspectRatioMode=QtCore.Qt.KeepAspectRatio)
+    #     # 显示thumbnail
+    #     self.thumbnail_label_2.setPixmap(pixmap)
+    #     reply = QMessageBox.question(self, "Register", "Thumbnail is showed on the left.\n"
+    #                                                  "Are you sure to register with the displayed face?")
+    #     if reply == QMessageBox.No:#不同意,donothing
+    #         return
+    #     # 同意
+    #     frameForEmb = np.array(frame).astype(np.uint8)
+    #     emb, _ = tools.FaceVerifier.get_emb_and_cropped_from_np(frameForEmb)
+    #     # 是否有人脸
+    #     if emb is None:
+    #         # 无人脸
+    #         QMessageBox.information(self, "Hint", "No face detected. Please try again.")
+    #         return
+    #     # 有人脸
+    #     # 推荐先验证
+    #     # reply = QMessageBox.question(self, "Register", "Do you want to confirm the validity of the face?"
+    #     #                                                "Press Yes to start test run, or press No to skip.")
+    #     # if reply == QMessageBox.Yes:
+    #     self.user.setFaceVector(emb)
+    #     QMessageBox.information(self, "Hint", "Register success.")
+
 # debug
 if __name__ == "__main__":
     import sys

@@ -409,7 +409,6 @@ class MyQCamera(QObject):
             # logging.debug(frame.dtype)
             image = QtGui.QImage(frame.data, frame.shape[1], frame.shape[0], QtGui.QImage.Format_RGB888)
             # logging.debug("23")
-
             pixmap = QtGui.QPixmap(image).scaled(self.display_size[0], self.display_size[1],
                                                  aspectRatioMode=QtCore.Qt.KeepAspectRatio)
             # logging.debug("pixmap converted")

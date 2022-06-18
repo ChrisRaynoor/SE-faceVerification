@@ -1,5 +1,5 @@
 import logging
-
+import settings
 import cv2
 import numpy as np
 from matplotlib import pyplot as plt
@@ -252,11 +252,20 @@ def metric(predict_proba, labels):
 
 def judge(result):
     acc = float(np.sum(result == 1)) / result.size
-    if acc > 0.7:
+    if acc > settings.ANTI_SPOOLING_VOTE_RATE_THRESHOLD:
         return True, acc
     else:
         return False, 1 - acc
 
+def predictByProbList(probList):
+    res = list()
+    for prob in probList:
+        if prob[1] > settings.ANTI_SPOOLING_SINGLE_FRAME_THRESHOLD:
+            res.append(1)
+        else:
+            res.append(0)
+    res = np.array(res).astype(float)
+    return res
 
 def anti_spoofing(imgs, svm):
     samples = []
@@ -279,7 +288,8 @@ def anti_spoofing(imgs, svm):
     logging.debug("5007")
     predict_proba = svm.predict_proba(samples)
     logging.debug("5008")
-    predict = svm.predict(samples)
+    # predict = svm.predict(samples)
+    predict = predictByProbList(predict_proba)
     logging.debug("5009")
     print(predict_proba)
     print(predict)
