@@ -86,6 +86,7 @@ class FaceVerifier:
         emb1 = emb1.astype(numpy.float32).reshape(1, 512)
         emb2 = emb2.astype(numpy.float32).reshape(1, 512)
         dis = np.linalg.norm(emb1 - emb2)
+        print(f"Distance: {dis}")
         return dis <= FACE_VER_THRESHOLD
 
 class Authenticator(QObject):

@@ -107,34 +107,6 @@
       </spacer>
      </item>
      <item>
-      <widget class="QGroupBox" name="groupBox_3">
-       <property name="title">
-        <string>Thumbnail</string>
-       </property>
-       <layout class="QGridLayout" name="gridLayout_4">
-        <item row="0" column="0">
-         <widget class="QLabel" name="thumbnail_label_2">
-          <property name="minimumSize">
-           <size>
-            <width>160</width>
-            <height>160</height>
-           </size>
-          </property>
-          <property name="text">
-           <string/>
-          </property>
-          <property name="alignment">
-           <set>Qt::AlignCenter</set>
-          </property>
-          <property name="margin">
-           <number>1</number>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </widget>
-     </item>
-     <item>
       <spacer name="verticalSpacer_2">
        <property name="orientation">
         <enum>Qt::Vertical</enum>
@@ -158,10 +130,10 @@
        <layout class="QGridLayout" name="gridLayout_2">
         <item row="0" column="0">
          <layout class="QGridLayout" name="gridLayout">
-          <item row="2" column="0" colspan="2">
-           <widget class="QPushButton" name="registerFace_pushButton">
+          <item row="1" column="0" colspan="2">
+           <widget class="QPushButton" name="faceAuthenticate_pushButton">
             <property name="text">
-             <string>Register Your Face</string>
+             <string>Face Authentication</string>
             </property>
            </widget>
           </item>
@@ -169,13 +141,6 @@
            <widget class="QPushButton" name="logout_pushButton">
             <property name="text">
              <string>Logout</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="0" colspan="2">
-           <widget class="QPushButton" name="faceAuthenticate_pushButton">
-            <property name="text">
-             <string>Face Authentication</string>
             </property>
            </widget>
           </item>

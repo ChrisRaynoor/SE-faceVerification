@@ -9,7 +9,7 @@ if __name__ == "__main__":
     conn = mydb.getConn()
     cur = conn.cursor()
     x = np.random.rand(1,512).astype(numpy.float32)
-    pth = "face4lsh.jpg"
+    pth = "zzx.jpg"
     img = PIL.Image.open(pth)
     frame = numpy.asarray(img)
     print(frame.dtype)
@@ -19,4 +19,4 @@ if __name__ == "__main__":
     with conn:
     #插入
         conn.execute("insert into user_authentication (username, password, faceVector)"
-                    "values ('4', '4', :arr)" , {"arr":emb})
+                    "values ('5', '5', :arr)" , {"arr":emb})
